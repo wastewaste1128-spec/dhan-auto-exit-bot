@@ -1,7 +1,7 @@
 services:
   - type: web
     name: dhan-auto-exit-bot
-    env: python
+    runtime: python
     plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"

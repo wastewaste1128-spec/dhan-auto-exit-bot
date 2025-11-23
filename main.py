@@ -1,66 +1,49 @@
-import time
 import os
+import time
 from dhanhq import dhanhq
 
-# Load credentials from environment
-client_id = os.getenv("DHAN_CLIENT_ID")
-access_token = os.getenv("DHAN_ACCESS_TOKEN")
+# -------------------------------------------------------
+# Load credentials from environment variables (SAFE)
+# -------------------------------------------------------
+CLIENT_ID = os.getenv("DHAN_CLIENT_ID")
+ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN")
+API_KEY = os.getenv("DHAN_API_KEY")
+SECRET_KEY = os.getenv("DHAN_SECRET_KEY")
 
-# Load trade details from environment
-symbol = os.getenv("OPTION_TOKEN")
-entry_price = float(os.getenv("ENTRY_PRICE"))
-quantity = int(os.getenv("QUANTITY"))
+# -------------------------------------------------------
+# Safety checks
+# -------------------------------------------------------
+if not CLIENT_ID or not ACCESS_TOKEN:
+    raise Exception("⚠️ Environment variables missing. Add keys in Render → Environment Variables")
 
-TARGET_POINTS = 1  # +1 point target
+# -------------------------------------------------------
+# Initialize DHAN API
+# -------------------------------------------------------
+dhan = dhanhq(clientId=CLIENT_ID, accessToken=ACCESS_TOKEN)
 
-# Initialize Dhan API
-dhan = dhanhq(client_id, access_token)
-
-def get_ltp(symbol):
-    """Fetch LTP"""
-    try:
-        res = dhan.get_quote(symbol)
-        return res["LTP"]
-    except:
-        return None
-
-def place_exit_order(symbol, quantity):
-    """Place market sell order"""
-    print("Placing EXIT ORDER...")
-    return dhan.place_order(
-        tag="AUTOEXIT",
-        transaction_type="SELL",
-        exchange_segment="NFO",
-        product_type="INTRADAY",
-        order_type="MARKET",
-        validity="DAY",
-        security_id=symbol,
-        quantity=quantity
-    )
-
-def monitor_trade():
-    target = entry_price + TARGET_POINTS
-    print(f"Auto Exit Bot Started")
-    print(f"Symbol: {symbol}")
-    print(f"Entry: {entry_price}")
-    print(f"Target: {target}")
+# -------------------------------------------------------
+# Your trading logic here
+# -------------------------------------------------------
+def run_bot():
+    print("Bot started...")
 
     while True:
-        ltp = get_ltp(symbol)
-        if ltp is None:
-            print("Failed to fetch LTP... retrying...")
-            time.sleep(1)
-            continue
+        try:
+            # Example: Fetch positions
+            positions = dhan.get_positions()
+            print("Current positions:", positions)
 
-        print(f"LTP: {ltp}")
+            # Add your logic here:
+            # place orders, modify orders, exit positions, etc.
 
-        if ltp >= target:
-            print("TARGET HIT")
-            place_exit_order(symbol, quantity)
-            break
+        except Exception as e:
+            print("Error:", e)
 
-        time.sleep(0.5)
+        time.sleep(5)  # avoid rate limit, adjust as needed
 
 
+# -------------------------------------------------------
+# Main function
+# -------------------------------------------------------
 if __name__ == "__main__":
-    monitor_trade()
+    run_bot()

@@ -29,6 +29,11 @@ def get_latest_option_position():
     positions = get_positions()
 
     for p in positions:
+        # Skip invalid string entries returned by API
+        if not isinstance(p, dict):
+            print("Invalid position entry:", p)
+            continue
+
         if (
             p.get("exchangeSegment") == "NFO"
             and p.get("productType") == "INTRADAY"
@@ -98,5 +103,4 @@ def start_monitoring():
         time.sleep(1)
 
 
-if __name__ == "__main__":
-    start_monitoring()
+# NOTE: No auto-start here. start_monitoring() will be called from server.py.

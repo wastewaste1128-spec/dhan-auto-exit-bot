@@ -1,4 +1,4 @@
-dhanhq
-requests
-flask
-gunicorn
+dhanhq==1.0.21
+requests==2.31.0
+flask==2.3.2
+gunicorn==23.0.0

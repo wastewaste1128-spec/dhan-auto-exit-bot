@@ -8,7 +8,7 @@ CLIENT_ID = os.getenv("DHAN_CLIENT_ID")
 ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN")
 
 TARGET_POINTS = 1.0          # +1 point target
-POLL_INTERVAL = 2            # seconds between checks
+POLL_INTERVAL = 0.5            # seconds between checks
 ALLOWED_SEGMENTS = {"NSE_FNO", "BSE_FNO"}  # NSE/BSE options only
 # ===========================
 

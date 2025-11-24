@@ -1,46 +1,33 @@
 from flask import Flask, request
+import threading
+from main import start_monitoring
 
 app = Flask(__name__)
 
-# Health check
 @app.route("/")
 def home():
-    return "Bot Running Successfully!"
+    return "Dhan Auto Exit Bot Running!"
 
+@app.route("/start")
+def start_bot():
+    token = request.args.get("token")
+    entry = request.args.get("entry")
+    qty = request.args.get("qty")
 
-# 1️⃣ Simple test - server working
-@app.route("/ping", methods=["GET"])
-def ping():
-    return {"status": "ok", "message": "Server active"}, 200
+    if not token or not entry or not qty:
+        return "Error: Missing parameters. Use /start?token=XXX&entry=YYY&qty=ZZZ"
 
+    try:
+        entry = float(entry)
+        qty = int(qty)
+    except:
+        return "Invalid entry or qty"
 
-# 2️⃣ Deep test - send dummy order data (no order placed)
-@app.route("/test", methods=["POST"])
-def test():
-    data = request.json
-    print("TEST DATA RECEIVED:", data)
-    return {
-        "message": "Test successful! No real order placed.",
-        "received": data
-    }, 200
+    # Run monitor in background thread
+    thread = threading.Thread(target=start_monitoring, args=(token, entry, qty))
+    thread.start()
 
-
-# 3️⃣ Dry-run for future trading endpoint (SAFE)
-@app.route("/place_order", methods=["POST"])
-def place_order():
-    data = request.json
-    
-    # If dry_run flag = true → DO NOT place real trade
-    if data.get("dry_run") == True:
-        return {
-            "message": "Dry-run mode: No real order placed.",
-            "received": data
-        }, 200
-    
-    # Real trading code will go here later (only after testing)
-    return {
-        "message": "Real trading disabled in testing mode. Add 'dry_run': true to test safely."
-    }, 403
+    return f"Auto Exit Started! Token={token}, Entry={entry}, Qty={qty}"
 
 
 if __name__ == "__main__":

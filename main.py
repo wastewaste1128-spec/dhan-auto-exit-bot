@@ -1,132 +1,232 @@
-import time
 import os
+import time
 import requests
 from dhanhq import dhanhq
 
-# ENV keys
-client_id = os.getenv("DHAN_CLIENT_ID")
-access_token = os.getenv("DHAN_ACCESS_TOKEN")
+# ========= CONFIG ==========
+CLIENT_ID = os.getenv("DHAN_CLIENT_ID")
+CLIENT_SECRET = os.getenv("DHAN_CLIENT_SECRET")
 
-dhan = dhanhq(client_id, access_token)
+TARGET_POINTS = 1.0          # +1 point target
+POLL_INTERVAL = 1.5          # seconds
+ALLOWED_SEGMENTS = {"NSE_FNO", "BSE_FNO"}  # F&O only
+# ===========================
 
-POLL_INTERVAL = 1.5   # seconds
-TARGET_POINTS = 1     # +1 point target
+if not CLIENT_ID or not CLIENT_SECRET:
+    raise RuntimeError(
+        "DHAN_CLIENT_ID or DHAN_CLIENT_SECRET missing in environment variables"
+    )
+
+# DhanHQ library still uses access token style for certain endpoints, 
+# but for LTP + Orders we MUST use V2 headers manually.
+dhan = dhanhq(CLIENT_ID, CLIENT_SECRET)
 
 
+# -------------------------------------------------
+# FETCH POSITIONS
+# -------------------------------------------------
 def get_positions():
+    """Fetch open positions safely."""
     try:
         pos = dhan.get_positions()
-        if isinstance(pos, str):
-            print("Positions API returned string:", pos)
-            return []
-        return pos.get("data", [])
+        print("Raw positions from API:", pos, flush=True)
+
+        if isinstance(pos, list):
+            return pos
+        if isinstance(pos, dict) and "data" in pos:
+            return pos["data"]
+        return []
     except Exception as e:
-        print("Position Error:", e)
+        print("Error fetching positions:", e, flush=True)
         return []
 
 
-def filter_open_option_positions():
-    positions = get_positions()
-    open_pos = []
+# -------------------------------------------------
+# FILTER ONLY OPTION POSITIONS
+# -------------------------------------------------
+def is_option_position(p: dict) -> bool:
+    if not isinstance(p, dict):
+        return False
 
-    print(f"Raw positions from API: {positions}")
+    if p.get("productType") != "INTRADAY":
+        return False
+
+    if p.get("exchangeSegment") not in ALLOWED_SEGMENTS:
+        return False
+
+    try:
+        net_qty = float(p.get("netQty", 0))
+    except Exception:
+        net_qty = 0
+
+    if net_qty <= 0:
+        return False
+
+    opt_type = p.get("drvOptionType")
+    if opt_type in ("CALL", "PUT"):
+        return True
+
+    sym = str(p.get("tradingSymbol", "")).upper()
+    return sym.endswith("CE") or sym.endswith("PE")
+
+
+def get_open_option_positions():
+    positions = get_positions()
+    option_positions = [p for p in positions if is_option_position(p)]
+
+    print(f"Filtered option positions ({len(option_positions)}):", flush=True)
+    for p in option_positions:
+        print(
+            f"- {p.get('tradingSymbol')} | seg={p.get('exchangeSegment')} "
+            f"netQty={p.get('netQty')} buyAvg={p.get('buyAvg')}",
+            flush=True,
+        )
+
+    return option_positions
+
+
+# -------------------------------------------------
+# FETCH LTP (V2 API)
+# -------------------------------------------------
+def get_ltp_map(positions):
+    payload = {}
 
     for p in positions:
-        if (
-            p.get("productType") == "INTRADAY"
-            and p.get("exchangeSegment") in ["NSE_FNO", "BSE_FNO"]
-            and p.get("netQty", 0) != 0
-        ):
-            open_pos.append(p)
+        seg = p.get("exchangeSegment")
+        sid = p.get("securityId")
 
-    print(f"Filtered option positions ({len(open_pos)}):")
-    for p in open_pos:
-        print(f"- {p['tradingSymbol']} | seg={p['exchangeSegment']} netQty={p['netQty']} buyAvg={p['buyAvg']}")
+        if not seg or sid is None:
+            continue
 
-    return open_pos
+        try:
+            sid = int(sid)
+        except:
+            pass
 
+        payload.setdefault(seg, []).append(sid)
 
-def get_ltp(segment, security_id):
+    if not payload:
+        return {}
+
     url = "https://api.dhan.co/v2/marketfeed/ltp"
-    headers = {"access-token": access_token}
 
-    payload = {
-        "NSE_FNO": [security_id] if segment == "NSE_FNO" else [],
-        "BSE_FNO": [security_id] if segment == "BSE_FNO" else []
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-Dhan-Client-Id": CLIENT_ID,
+        "X-Dhan-Client-Secret": CLIENT_SECRET,
     }
 
     try:
-        response = requests.post(url, json=payload, headers=headers)
-        print("LTP API status:", response.status_code)
-        print("LTP API raw response:", response.text)
+        resp = requests.post(url, headers=headers, json=payload, timeout=3)
+        print("LTP API status:", resp.status_code, flush=True)
+        print("LTP API raw response:", resp.text, flush=True)
 
-        if response.status_code != 200:
-            return None
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
 
-        data = response.json()
-        segdata = data["data"].get(segment, {})
-        if str(security_id) in segdata:
-            return segdata[str(security_id)]["last_price"]
-        return None
+        ltp_map = {}
+
+        for seg, sec_data in data.items():
+            if not isinstance(sec_data, dict):
+                continue
+            for sid, quote in sec_data.items():
+                if not isinstance(quote, dict):
+                    continue
+
+                price = quote.get("last_price")
+                if price is not None:
+                    ltp_map[(seg, str(sid))] = float(price)
+
+        return ltp_map
 
     except Exception as e:
-        print("Error fetching LTP:", e)
-        return None
+        print("Error fetching LTP:", e, flush=True)
+        return {}
 
 
-def place_exit_order(position):
-    print(f"Placing exit order for {position['tradingSymbol']} qty={position['netQty']}")
+# -------------------------------------------------
+# EXIT ORDER
+# -------------------------------------------------
+def exit_position(p):
+    seg = p["exchangeSegment"]
+    sid = str(p["securityId"])
+    qty = int(p["netQty"])
 
-    order_data = {
+    body = {
+        "dhanClientId": CLIENT_ID,
         "transactionType": "SELL",
-        "exchangeSegment": position["exchangeSegment"],
+        "exchangeSegment": seg,
         "productType": "INTRADAY",
         "orderType": "MARKET",
-        "securityId": int(position["securityId"]),
-        "quantity": abs(int(position["netQty"])),
+        "validity": "DAY",
+        "securityId": sid,
+        "quantity": qty,
         "disclosedQuantity": 0,
+        "price": 0,
+        "triggerPrice": 0,
         "afterMarketOrder": False,
-        "amoTime": "OPEN",
-        "channel": "API"
+        "amoTime": "",
+        "boProfitValue": 0,
+        "boStopLossValue": 0,
+        "drvExpiryDate": p.get("drvExpiryDate", ""),
+        "drvOptionType": p.get("drvOptionType"),
+        "drvStrikePrice": p.get("drvStrikePrice", 0),
     }
 
+    url = "https://api.dhan.co/v2/orders"
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-Dhan-Client-Id": CLIENT_ID,
+        "X-Dhan-Client-Secret": CLIENT_SECRET,
+    }
+
+    print(f"Placing exit order for {p.get('tradingSymbol')} qty={qty}", flush=True)
+
     try:
-        res = dhan.place_order(order_data)
-        print("Exit order response:", res)
-        return res
+        resp = requests.post(url, headers=headers, json=body, timeout=5)
+        print("Exit order response:", resp.status_code, resp.text, flush=True)
     except Exception as e:
-        print("Exit order failed:", e)
-        return None
+        print("Error placing exit order:", e, flush=True)
 
 
+# -------------------------------------------------
+# MAIN MONITOR LOOP
+# -------------------------------------------------
 def start_monitoring():
-    print("Monitoring started...")
+    print("Monitoring started...", flush=True)
 
     while True:
-        positions = filter_open_option_positions()
+        positions = get_open_option_positions()
 
         if not positions:
-            print("No open option positions. Sleeping...")
+            print("No option positions. Sleeping...", flush=True)
             time.sleep(POLL_INTERVAL)
             continue
 
-        for pos in positions:
-            segment = pos["exchangeSegment"]
-            sid = pos["securityId"]
-            buy_avg = float(pos["buyAvg"])
-            net_qty = int(pos["netQty"])
+        ltp_map = get_ltp_map(positions)
 
+        for p in positions:
+            seg = p["exchangeSegment"]
+            sid = str(p["securityId"])
+            buy_avg = float(p.get("buyAvg", 0))
             target = buy_avg + TARGET_POINTS
+            ltp = ltp_map.get((seg, sid))
 
-            ltp = get_ltp(segment, sid)
+            print(
+                f"{p['tradingSymbol']} | seg={seg} sid={sid} "
+                f"buyAvg={buy_avg} target={target} LTP={ltp}",
+                flush=True,
+            )
 
-            print(f"{pos['tradingSymbol']} | seg={segment} sid={sid} buyAvg={buy_avg} target={target} LTP={ltp}")
-
-            if ltp is None:
-                continue
-
-            if ltp >= target:
-                print(f"TARGET HIT: {pos['tradingSymbol']} LTP {ltp} >= {target}. Sending exit order...")
-                place_exit_order(pos)
+            if ltp is not None and ltp >= target:
+                print(
+                    f"TARGET HIT → {p['tradingSymbol']} "
+                    f"LTP {ltp} >= {target} → Exiting...",
+                    flush=True,
+                )
+                exit_position(p)
 
         time.sleep(POLL_INTERVAL)

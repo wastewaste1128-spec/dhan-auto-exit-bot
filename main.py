@@ -144,10 +144,14 @@ def get_ltp_map(positions):
 
 
 def exit_position(p):
-    """Place a market SELL order to fully exit the given position."""
     seg = p["exchangeSegment"]
     sec_id = str(p["securityId"])
     qty = int(p["netQty"])
+
+    # Fix expiry date to remove time part
+    expiry = p.get("drvExpiryDate", "")
+    if " " in expiry:
+        expiry = expiry.split(" ")[0]   # keep only YYYY-MM-DD
 
     body = {
         "dhanClientId": CLIENT_ID,
@@ -158,17 +162,14 @@ def exit_position(p):
         "validity": "DAY",
         "securityId": sec_id,
         "quantity": qty,
-        "disclosedQuantity": 0,
         "price": 0,
         "triggerPrice": 0,
         "afterMarketOrder": False,
-        "amoTime": "",
-        "boProfitValue": 0,
-        "boStopLossValue": 0,
-        # Derivative fields (optional but we pass if available)
-        "drvExpiryDate": p.get("drvExpiryDate", ""),
+
+        # REQUIRED for OPTIONS in DHAN V2
+        "drvExpiryDate": expiry,
         "drvOptionType": p.get("drvOptionType"),
-        "drvStrikePrice": p.get("drvStrikePrice", 0),
+        "drvStrikePrice": float(p.get("drvStrikePrice", 0))
     }
 
     url = "https://api.dhan.co/v2/orders"

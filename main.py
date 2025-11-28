@@ -38,6 +38,38 @@ def get_positions():
         print("Error fetching positions:", e, flush=True)
         return []
 
+def get_last_buy_price(security_id):
+    """Fetch last executed BUY price for this security from Dhan Orders API."""
+    url = "https://api.dhan.co/v2/orders"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "access-token": ACCESS_TOKEN,
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        orders = resp.json().get("data", [])
+    except Exception as e:
+        print("Error fetching orders:", e, flush=True)
+        return None
+
+    # Filter only executed/filled BUY orders for this security
+    buys = [
+        o for o in orders
+        if o.get("securityId") == str(security_id)
+        and o.get("transactionType") == "BUY"
+        and o.get("orderStatus") in ("TRADED", "EXECUTED")
+    ]
+
+    if not buys:
+        return None
+
+    # Get the most recent executed BUY
+    last_buy = sorted(buys, key=lambda x: x.get("orderPlacedTime", ""), reverse=True)[0]
+
+    return float(last_buy.get("transactionPrice", 0))
+
 
 def is_option_position(p: dict) -> bool:
     """Filter: intraday CE/PE options only, NSE_FNO / BSE_FNO, long positions."""
@@ -205,10 +237,13 @@ def start_monitoring():
             seg = p.get("exchangeSegment")
             sid = str(p.get("securityId"))
 
-            try:
-                entry_price = get_entry_price_from_orders(p["securityId"])
-            except Exception:
-                buy_avg = 0.0
+           # Fetch TRUE entry price from the last executed BUY order
+entry_price = get_last_buy_price(sid)
+
+if entry_price is None:
+    print(f"Could not fetch last buy price for {p.get('tradingSymbol')}, skipping...", flush=True)
+    continue
+
 
             target = buy_avg + TARGET_POINTS
             ltp = ltp_map.get((seg, sid))

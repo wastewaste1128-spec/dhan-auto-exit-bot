@@ -206,7 +206,7 @@ def start_monitoring():
             sid = str(p.get("securityId"))
 
             try:
-                buy_avg = float(p.get("buyAvg", 0))
+                buy_avg = float(p.get("costPrice", p.get("buyAvg", 0)))
             except Exception:
                 buy_avg = 0.0
 

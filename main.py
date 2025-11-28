@@ -238,12 +238,11 @@ def start_monitoring():
             sid = str(p.get("securityId"))
 
            # Fetch TRUE entry price from the last executed BUY order
-entry_price = get_last_buy_price(sid)
+            entry_price = get_last_buy_price(sid)
 
-if entry_price is None:
-    print(f"Could not fetch last buy price for {p.get('tradingSymbol')}, skipping...", flush=True)
-    continue
-
+            if entry_price is None:
+                print(f"Could not fetch last buy price for {p.get('tradingSymbol')}, skipping...", flush=True)
+                continue
 
             target = buy_avg + TARGET_POINTS
             ltp = ltp_map.get((seg, sid))

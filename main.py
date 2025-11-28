@@ -206,7 +206,7 @@ def start_monitoring():
             sid = str(p.get("securityId"))
 
             try:
-                buy_avg = float(p.get("costPrice", p.get("buyAvg", 0)))
+                entry_price = get_entry_price_from_orders(p["securityId"])
             except Exception:
                 buy_avg = 0.0
 

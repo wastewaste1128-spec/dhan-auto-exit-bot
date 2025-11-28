@@ -219,12 +219,53 @@ def start_monitoring():
                 flush=True,
             )
 
-            if ltp is not None and ltp >= target:
+                       # ================================
+            # TRAILING STOPLOSS + TARGET LOGIC
+            # ================================
+
+            # Initialize trailing parameters (first time only)
+            if "initialized" not in p:
+                p["trail_sl"] = buy_avg - 1            # initial stoploss
+                p["trail_target"] = buy_avg + 1        # initial target
+                p["initialized"] = True
                 print(
-                    f"TARGET HIT: {p.get('tradingSymbol')} "
-                    f"LTP {ltp} >= {target}. Sending exit order...",
-                    flush=True,
+                    f"Initialized trailing for {p['tradingSymbol']} | "
+                    f"SL={p['trail_sl']} Target={p['trail_target']}",
+                    flush=True
+                )
+
+            # Update trailing SL and target when price moves up
+            if ltp is not None and ltp > p["trail_target"]:
+                diff = ltp - (buy_avg + 1)             # how much above initial target
+                p["trail_sl"] = (buy_avg - 1) + diff   # SL follows by 1 rupee distance
+                p["trail_target"] = (buy_avg + 1) + diff
+                print(
+                    f"Updated Trailing for {p['tradingSymbol']} | "
+                    f"New SL={p['trail_sl']} New Target={p['trail_target']}",
+                    flush=True
+                )
+
+            # HIT trailing target → EXIT
+            if ltp is not None and ltp >= p["trail_target"]:
+                print(
+                    f"TARGET HIT (Trailing): {p['tradingSymbol']} | "
+                    f"LTP {ltp} >= Target {p['trail_target']} Exiting...",
+                    flush=True
                 )
                 exit_position(p)
+                p["initialized"] = False
+                continue
+
+            # HIT trailing stoploss → EXIT
+            if ltp is not None and ltp <= p["trail_sl"]:
+                print(
+                    f"STOPLOSS HIT (Trailing SL): {p['tradingSymbol']} | "
+                    f"LTP {ltp} <= SL {p['trail_sl']} Exiting...",
+                    flush=True
+                )
+                exit_position(p)
+                p["initialized"] = False
+                continue
+
 
         time.sleep(POLL_INTERVAL)
